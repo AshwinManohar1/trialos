@@ -76,6 +76,12 @@ export const api = {
     fetch(`${API_BASE}/api/studies/${studyId}/protocol/fill`, { method: 'POST' }).then(r => r.json()),
   getProtocol: (studyId: string) =>
     fetch(`${API_BASE}/api/studies/${studyId}/protocol`).then(r => r.json()),
+  rewriteSection: (studyId: string, text: string, instruction: string) =>
+    fetch(`${API_BASE}/api/studies/${studyId}/protocol/rewrite-section`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, instruction }),
+    }).then(r => r.json()),
 
   // Risk
   uploadRiskDocument: (studyId: string, file: File) => {

@@ -45,6 +45,34 @@ async def _call_openai_json(system_prompt: str, user_prompt: str, max_tokens: in
         return json.loads(raw)
 
 
+async def _call_openai_text(system_prompt: str, user_prompt: str, max_tokens: int = 2048) -> str:
+    """Call OpenAI and return raw text (no JSON parsing)."""
+    response = await get_client().chat.completions.create(
+        model="gpt-4o",
+        max_tokens=max_tokens,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+async def rewrite_section(text: str, instruction: str) -> str:
+    """Rewrite a protocol text section per the given instruction.
+    Returns plain text (or minimal HTML) suitable for insertion into the editor.
+    """
+    system = (
+        "You are a clinical protocol writer specialising in ICH/FDA-compliant "
+        "bioequivalence study documents. Rewrite the provided protocol text exactly "
+        "as instructed. Output ONLY the rewritten text — no preamble, no explanation, "
+        "no markdown fences. Preserve the original meaning and clinical accuracy. "
+        "Use plain prose; do not add bullet points unless the original has them."
+    )
+    user = f"Instruction: {instruction}\n\nOriginal text:\n{text}"
+    return await _call_openai_text(system, user, max_tokens=800)
+
+
 # ──────────────────────────────────────────────
 # Prompts
 # ──────────────────────────────────────────────

@@ -3,12 +3,13 @@ from datetime import datetime
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from database import get_gridfs
 from models import Study, DrugProfile, DerivedPKProperties, ProtocolDocument, OrgTemplate
 from schemas import ProtocolDocumentResponse
 from services import docx_service
-from services.claude_service import generate_protocol_sections
+from services.claude_service import generate_protocol_sections, rewrite_section
 
 router = APIRouter(tags=["Protocol"])
 
@@ -264,3 +265,21 @@ async def download_filled_protocol(study_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{proto.filled_filename}"'},
     )
+
+
+class RewriteRequest(BaseModel):
+    text: str
+    instruction: str
+
+
+@router.post("/studies/{study_id}/protocol/rewrite-section")
+async def rewrite_protocol_section(study_id: str, payload: RewriteRequest):
+    """Rewrite a selected protocol section using AI."""
+    await _require_study(study_id)
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    try:
+        rewritten = await rewrite_section(payload.text, payload.instruction)
+        return {"text": rewritten}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rewrite failed: {e}")
