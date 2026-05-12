@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 interface SidebarProps {
   studyId?: string;
@@ -10,6 +10,12 @@ interface SidebarProps {
 
 export function Sidebar({ studyId, studyLabel }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  function handleLogout() {
+    localStorage.removeItem('trialos_auth');
+    router.replace('/login');
+  }
 
   const isActive = (href: string) => pathname === href;
   const isStartsWith = (prefix: string) => pathname.startsWith(prefix);
@@ -208,13 +214,17 @@ export function Sidebar({ studyId, studyLabel }: SidebarProps) {
           <span className="text-xs" style={{ color: 'rgba(255,255,255,0.25)', fontFamily: 'var(--mono)' }}>
             v0.1.0
           </span>
-          <Link
-            href="/templates"
-            className="text-xs hover:text-white/70 transition-colors"
-            style={{ color: 'rgba(255,255,255,0.3)' }}
+          <button
+            onClick={handleLogout}
+            className="text-xs hover:text-white/70 transition-colors flex items-center gap-1"
+            style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
           >
-            Settings
-          </Link>
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <path d="M7 2H9.5V9H7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M1.5 5.5h6M5 3l2.5 2.5L5 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Logout
+          </button>
         </div>
       </div>
     </div>

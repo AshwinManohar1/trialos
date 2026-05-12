@@ -21,6 +21,10 @@ export default function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (localStorage.getItem('trialos_auth') !== 'true') {
+      router.replace('/login');
+      return;
+    }
     loadStudies();
   }, []);
 

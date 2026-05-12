@@ -6,7 +6,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+_client: AsyncOpenAI | None = None
+
+def get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+        _client = AsyncOpenAI(api_key=api_key)
+    return _client
 
 # ──────────────────────────────────────────────
 # Core OpenAI helpers
@@ -14,7 +23,7 @@ client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
 
 async def _call_openai(system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> str:
     """Call OpenAI and return raw text response."""
-    response = await client.chat.completions.create(
+    response = await get_client().chat.completions.create(
         model="gpt-4o",
         max_tokens=max_tokens,
         response_format={"type": "json_object"},
