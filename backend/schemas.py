@@ -10,6 +10,7 @@ from datetime import datetime
 class StudyCreate(BaseModel):
     id: Optional[str] = None
     name: str
+    study_phase: Optional[str] = None  # phase_1_be | early_fih | phase_1_2 | phase_2 | phase_3
 
 
 class StudyResponse(BaseModel):
@@ -17,6 +18,7 @@ class StudyResponse(BaseModel):
     org_id: str
     name: str
     status: str
+    study_phase: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -187,10 +189,30 @@ class StudyListItemResponse(BaseModel):
     org_id: str
     name: str
     status: str
+    study_phase: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     drug_profile: Optional[DrugProfileResponse] = None
     risk_report: Optional[RiskReportResponse] = None
+
+
+# ──────────────────────────────────────────────
+# PK Properties PATCH
+# ──────────────────────────────────────────────
+
+class PKPatch(BaseModel):
+    half_life_hours: Optional[float] = None
+    tmax_hours: Optional[float] = None
+    absorption_class: Optional[str] = None
+    pk_sampling_timepoints: Optional[List[float]] = None
+    washout_days: Optional[int] = None
+    confinement_hours: Optional[int] = None
+    ambulatory_visits: Optional[List[str]] = None
+    posture_restriction: Optional[str] = None
+    intrasubject_cv: Optional[float] = None
+    sample_size_recommended: Optional[int] = None
+    sample_size_basis: Optional[str] = None
+    safety_flags: Optional[List[Dict[str, Any]]] = None
 
 
 # Full Study Detail (all related data)

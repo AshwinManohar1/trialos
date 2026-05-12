@@ -38,7 +38,7 @@ export const api = {
         }
         return data;
       }),
-  createStudy: (data: { id: string; name: string }) =>
+  createStudy: (data: { id: string; name: string; study_phase?: string }) =>
     fetch(`${API_BASE}/api/studies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,6 +56,12 @@ export const api = {
     fetch(`${API_BASE}/api/studies/${studyId}/drug-lookup`, { method: 'POST' }).then(r => r.json()),
   getDerivedPK: (studyId: string) =>
     fetch(`${API_BASE}/api/studies/${studyId}/drug-lookup`).then(r => r.json()),
+  patchPK: (studyId: string, updates: Record<string, unknown>) =>
+    fetch(`${API_BASE}/api/studies/${studyId}/pk`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).then(r => r.json()),
 
   // Protocol
   uploadTemplate: (studyId: string, file: File) => {

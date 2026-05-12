@@ -16,6 +16,14 @@ const COUNTRIES = [
   'Australia', 'Canada', 'Japan', 'Brazil', 'South Africa', 'Singapore',
 ];
 
+const STUDY_PHASES = [
+  { value: 'early_fih', label: 'Early Phase / FIH', available: false },
+  { value: 'phase_1_be', label: 'Phase I BE', available: true },
+  { value: 'phase_1_2', label: 'Phase I/II', available: false },
+  { value: 'phase_2', label: 'Phase II', available: false },
+  { value: 'phase_3', label: 'Phase III', available: false },
+];
+
 interface FormErrors {
   [key: string]: string;
 }
@@ -63,6 +71,7 @@ export default function NewStudyPage() {
   const [sponsorName, setSponsorName] = useState('');
   const [sponsorCountry, setSponsorCountry] = useState('India');
   const [specialInstructions, setSpecialInstructions] = useState('');
+  const [studyPhase, setStudyPhase] = useState('phase_1_be');
 
   useEffect(() => {
     setStudyId(generateStudyId());
@@ -97,7 +106,7 @@ export default function NewStudyPage() {
     setSubmitting(true);
     setGlobalError(null);
     try {
-      await api.createStudy({ id: studyId, name: studyName || `BE Study — ${drugName}` });
+      await api.createStudy({ id: studyId, name: studyName || `BE Study — ${drugName}`, study_phase: studyPhase });
       await api.saveDrugProfile(studyId, {
         drug_name: drugName,
         dose: `${dose} ${doseUnit}`.trim(),
@@ -194,6 +203,50 @@ export default function NewStudyPage() {
           )}
 
           <form onSubmit={handleSubmit}>
+
+            {/* Study Phase */}
+            <div className="mb-6">
+              <div className="section-header">
+                <span>Study Phase</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {STUDY_PHASES.map(phase => (
+                  <button
+                    key={phase.value}
+                    type="button"
+                    disabled={!phase.available}
+                    onClick={() => phase.available && setStudyPhase(phase.value)}
+                    style={{
+                      fontSize: 12,
+                      fontWeight: studyPhase === phase.value ? 600 : 400,
+                      padding: '6px 14px',
+                      borderRadius: 20,
+                      border: studyPhase === phase.value
+                        ? '1.5px solid var(--teal)'
+                        : '1px solid var(--border)',
+                      background: studyPhase === phase.value
+                        ? 'var(--teal-light)'
+                        : phase.available ? 'var(--surface)' : 'var(--surface-2)',
+                      color: studyPhase === phase.value
+                        ? 'var(--teal)'
+                        : phase.available ? 'var(--text-2)' : 'var(--text-3)',
+                      cursor: phase.available ? 'pointer' : 'not-allowed',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    {phase.label}
+                    {!phase.available && (
+                      <span style={{ fontSize: 10, marginLeft: 5, opacity: 0.6 }}>soon</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {studyPhase === 'phase_1_be' && (
+                <p style={{ fontSize: 11, color: 'var(--teal)', marginTop: 8 }}>
+                  ✓ Full AI workflow — drug lookup, PK derivation, protocol generation, risk analysis
+                </p>
+              )}
+            </div>
 
             {/* Study Identification */}
             <div className="mb-6">
@@ -456,7 +509,7 @@ export default function NewStudyPage() {
               </div>
               <div>
                 <label className="block font-medium mb-1" style={{ fontSize: 11, color: 'var(--text-2)' }}>
-                  Special Notes
+                  Study Instructions
                   <span style={{ color: 'var(--text-3)', fontWeight: 400, marginLeft: 6 }}>
                     optional — drug-specific restrictions, known interactions
                   </span>

@@ -2,7 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
 from models import Study, DrugProfile, DerivedPKProperties
-from schemas import DrugProfileCreate, DrugProfileResponse, DerivedPKPropertiesResponse
+from schemas import DrugProfileCreate, DrugProfileResponse, DerivedPKPropertiesResponse, PKPatch
 from services import claude_service
 
 router = APIRouter(tags=["Drug Lookup"])
@@ -164,4 +164,28 @@ async def get_drug_lookup(study_id: str):
             status_code=404,
             detail="No PK properties found for this study. Run drug lookup first.",
         )
+    return _pk_out(pk)
+
+
+@router.patch(
+    "/studies/{study_id}/pk",
+    response_model=DerivedPKPropertiesResponse,
+)
+async def patch_pk_properties(study_id: str, payload: PKPatch):
+    """Partially update derived PK properties for a study."""
+    await _require_study(study_id)
+
+    pk = await DerivedPKProperties.find_one(DerivedPKProperties.study_id == study_id)
+    if not pk:
+        raise HTTPException(
+            status_code=404,
+            detail="No PK properties found for this study. Run drug lookup first.",
+        )
+
+    # Apply only the fields that were provided (non-None)
+    updates = payload.model_dump(exclude_none=True)
+    for field, value in updates.items():
+        setattr(pk, field, value)
+
+    await pk.save()
     return _pk_out(pk)

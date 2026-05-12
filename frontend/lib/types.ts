@@ -5,6 +5,7 @@ export interface Study {
   id: string;
   name: string;
   status: StudyStatus;
+  study_phase?: string;
   created_at: string;
   updated_at: string;
   drug_profile?: DrugProfile;
