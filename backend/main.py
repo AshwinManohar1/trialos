@@ -274,8 +274,14 @@ async def seed_database():
 
 @app.on_event("startup")
 async def startup():
-    await connect_db(DOCUMENT_MODELS)
-    await seed_database()
+    try:
+        await connect_db(DOCUMENT_MODELS)
+        await seed_database()
+        print("✓ Database connected and seeded.")
+    except Exception as e:
+        # Log but don't crash — lets /health respond so Railway doesn't kill the container
+        print(f"⚠ Database startup error: {e}")
+        print("  Server is running but DB-dependent routes will fail until MONGODB_URL is set.")
 
 
 @app.on_event("shutdown")
