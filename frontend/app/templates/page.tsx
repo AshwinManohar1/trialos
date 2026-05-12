@@ -63,6 +63,14 @@ export default function TemplatesPage() {
     }
     setErrorMessage(null);
     setSelectedFile(file);
+    // Auto-fill name from filename if name is empty
+    if (!templateName.trim()) {
+      const autoName = file.name
+        .replace(/\.docx$/i, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+      setTemplateName(autoName);
+    }
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
