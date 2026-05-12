@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+*.db
+uploads/
+generated/
+templates/
+.git
+.gitignore
+scripts/

@@ -1,0 +1,196 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #F0F2F5;
+  --surface: #FFFFFF;
+  --surface-2: #F8F9FA;
+  --border: #DEE2E6;
+  --border-strong: #ADB5BD;
+  --navy: #1B2A3B;
+  --navy-light: #243447;
+  --teal: #0F7B6C;
+  --teal-light: #E6F4F1;
+  --text: #212529;
+  --text-2: #495057;
+  --text-3: #6C757D;
+  --critical: #B02A37;
+  --critical-bg: #FFF0F0;
+  --critical-border: #F5C2C7;
+  --warning: #856404;
+  --warning-bg: #FFF8E1;
+  --warning-border: #FFECB5;
+  --info: #0A58CA;
+  --info-bg: #EFF6FF;
+  --success: #146C43;
+  --success-bg: #D1E7DD;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Monospace utility */
+.font-mono,
+.mono {
+  font-family: var(--mono) !important;
+}
+
+/* Borders — clinical, not rounded */
+button,
+input,
+select,
+textarea {
+  border-radius: 3px;
+}
+
+/* Input focus */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px rgba(15, 123, 108, 0.15);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+/* Table base */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+/* Upload zone */
+.upload-zone {
+  border: 2px dashed var(--border-strong);
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: var(--teal);
+  background-color: var(--teal-light);
+}
+
+/* Skeleton animation */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+.skeleton {
+  background: var(--border);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  border-radius: 3px;
+}
+
+/* Fade in */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Spin */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Section headers — HR style */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.section-header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.section-header span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* Status dot indicators */
+.dot-active  { color: var(--teal); }
+.dot-complete { color: var(--success); }
+.dot-draft   { color: var(--text-3); }
+
+/* Pipeline status bars */
+.pipeline-bar {
+  width: 3px;
+  border-radius: 0;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+.pipeline-bar.complete { background: var(--success); }
+.pipeline-bar.running  { background: var(--teal); }
+.pipeline-bar.critical { background: var(--critical); }
+.pipeline-bar.warning  { background: var(--warning); }
+.pipeline-bar.pending  { background: var(--border-strong); }
+
+/* Risk section dividers */
+.risk-divider-critical { border-left: 4px solid var(--critical); }
+.risk-divider-warning  { border-left: 4px solid var(--warning); }
+.risk-divider-info     { border-left: 4px solid var(--info); }
+
+/* Top bar */
+.topbar {
+  height: 48px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 240px;
+  z-index: 9;
+}
+
+/* Content area offset */
+.content-area {
+  margin-left: 240px;
+  padding-top: 48px;
+  min-height: 100vh;
+}
