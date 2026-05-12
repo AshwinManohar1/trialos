@@ -175,28 +175,69 @@ ${sourceRefs.map(ref => `<li>${ref}</li>`).join('\n')}
 
 // ─── Selection toolbar (custom bubble menu) ──────────────────────────────────
 
-function useSelectionPos(editor: ReturnType<typeof useEditor> | null) {
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+interface SelectionInfo {
+  top: number;   // viewport-relative (for position: fixed)
+  left: number;
+  text: string;  // captured at selection time, survives editor blur
+  from: number;  // ProseMirror doc positions — for precise replacement
+  to: number;
+}
+
+function useSelectionInfo(editor: ReturnType<typeof useEditor> | null) {
+  const [info, setInfo] = useState<SelectionInfo | null>(null);
+
+  // Compute position + capture text from current editor selection
+  const compute = useCallback(() => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) { setInfo(null); return; }
+    const capturedText = editor.state.doc.textBetween(from, to, '\n');
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    if (!r.width) return;
+    setInfo({
+      top: r.top,        // viewport coords — used with position:fixed, no scrollY
+      left: r.left + r.width / 2,
+      text: capturedText,
+      from,
+      to,
+    });
+  }, [editor]);
 
   useEffect(() => {
     if (!editor) return;
-    const update = () => {
-      const { from, to } = editor.state.selection;
-      if (from === to) { setRect(null); return; }
-      const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0) { setRect(null); return; }
-      const r = sel.getRangeAt(0).getBoundingClientRect();
-      if (!r.width) { setRect(null); return; }
-      setRect({ top: r.top + window.scrollY, left: r.left + r.width / 2, width: r.width });
-    };
-    editor.on('selectionUpdate', update);
-    editor.on('blur', () => setRect(null));
-    return () => {
-      editor.off('selectionUpdate', update);
-    };
-  }, [editor]);
 
-  return rect;
+    // Fire on every selection change inside the editor
+    editor.on('selectionUpdate', compute);
+
+    // Also catch mouseup (covers initial drag-select before editor fires)
+    const onMouseUp = () => setTimeout(compute, 30);
+    document.addEventListener('mouseup', onMouseUp);
+
+    // Hide only when selection truly collapses — NOT on editor blur,
+    // so the bubble survives clicks into the custom-prompt input
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const bubble = document.getElementById('proto-bubble');
+      if (bubble && bubble.contains(target)) return; // click inside bubble — keep it
+      // clicked outside bubble → collapse check after a tick
+      setTimeout(() => {
+        if (!editor) return;
+        const { from, to } = editor.state.selection;
+        if (from === to) setInfo(null);
+      }, 50);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+
+    return () => {
+      editor.off('selectionUpdate', compute);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('mousedown', onDocMouseDown);
+    };
+  }, [editor, compute]);
+
+  return { info, dismiss: () => setInfo(null) };
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -225,6 +266,7 @@ export default function ProtocolPage() {
   const [rewriteError, setRewriteError] = useState<string | null>(null);
   const [protocolHTML, setProtocolHTML] = useState<string>('');
   const [bubbleLabel, setBubbleLabel] = useState<string | null>(null);
+  const [customPrompt, setCustomPrompt] = useState('');
 
   // ── Tiptap editor ──
   const editor = useEditor({
@@ -238,7 +280,7 @@ export default function ProtocolPage() {
     },
   });
 
-  const selectionRect = useSelectionPos(editor);
+  const { info: selectionInfo, dismiss: dismissBubble } = useSelectionInfo(editor);
 
   // Update editor content when protocolHTML changes
   useEffect(() => {
@@ -343,18 +385,28 @@ export default function ProtocolPage() {
   }
 
   // ── Bubble menu rewrite ──
+  // Uses captured text + stored doc positions — works even after editor loses focus
   async function handleRewrite(instruction: string) {
-    if (!editor || rewriting) return;
-    const { from, to } = editor.state.selection;
-    const selectedText = editor.state.doc.textBetween(from, to, '\n');
-    if (!selectedText.trim()) return;
+    if (!editor || rewriting || !selectionInfo) return;
+    const { text: capturedText, from, to } = selectionInfo;
+    if (!capturedText.trim()) return;
 
     setRewriting(true);
     setRewriteError(null);
     try {
-      const result = await api.rewriteSection(studyId, selectedText, instruction);
+      const result = await api.rewriteSection(studyId, capturedText, instruction);
       if (result?.text) {
-        editor.chain().focus().insertContent(result.text).run();
+        // Replace the exact range that was selected, using stored positions
+        editor.chain()
+          .focus()
+          .command(({ tr, state }) => {
+            tr.replaceWith(from, to, state.schema.text(result.text));
+            return true;
+          })
+          .run();
+        dismissBubble();
+        setCustomPrompt('');
+        setBubbleLabel(null);
       }
     } catch {
       setRewriteError('Rewrite failed. Please try again.');
@@ -726,8 +778,7 @@ export default function ProtocolPage() {
                   <circle cx="6.5" cy="4" r="0.6" fill="var(--info)" />
                 </svg>
                 <span style={{ color: 'var(--text-2)' }}>
-                  <strong>Select any text</strong> to see AI rewrite options (More formal · Simplify · Expand · ICH language).
-                  Edit directly at any time. Download DOCX from the top-right button.
+                  <strong>Select any text</strong> to get AI rewrite options — choose a preset (More formal · Simplify · Expand) or <strong>type your own instruction</strong> and press Enter. Edit directly at any time.
                 </span>
               </div>
 
@@ -856,33 +907,105 @@ export default function ProtocolPage() {
                 </div>
 
                 {/* Custom floating bubble menu — shown when text is selected */}
-                {selectionRect && (
+                {selectionInfo && (
                   <div
-                    className="protocol-bubble-menu"
+                    id="proto-bubble"
                     style={{
                       position: 'fixed',
-                      top: selectionRect.top - 46,
-                      left: selectionRect.left,
+                      top: selectionInfo.top - 90,
+                      left: selectionInfo.left,
                       transform: 'translateX(-50%)',
                       zIndex: 50,
+                      background: 'var(--navy)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 8,
+                      padding: '8px',
+                      boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+                      minWidth: 320,
                     }}
                   >
-                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', padding: '0 4px', alignSelf: 'center' }}>AI</span>
-                    <div className="separator" />
-                    {REWRITE_ACTIONS.map(action => (
-                      <button
-                        key={action.label}
-                        onMouseDown={e => {
-                          e.preventDefault(); // keep selection
-                          handleRewrite(action.instruction);
-                          setBubbleLabel(action.label);
+                    {/* Preset action pills */}
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {REWRITE_ACTIONS.map(action => (
+                        <button
+                          key={action.label}
+                          onMouseDown={e => {
+                            e.preventDefault();
+                            setBubbleLabel(action.label);
+                            handleRewrite(action.instruction);
+                          }}
+                          disabled={rewriting}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            color: bubbleLabel === action.label && rewriting
+                              ? 'rgba(255,255,255,0.4)'
+                              : 'rgba(255,255,255,0.85)',
+                            background: 'rgba(255,255,255,0.08)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: 4,
+                            cursor: rewriting ? 'not-allowed' : 'pointer',
+                            whiteSpace: 'nowrap',
+                            transition: 'background 0.1s',
+                          }}
+                        >
+                          {rewriting && bubbleLabel === action.label ? '…' : action.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', marginBottom: 8 }} />
+
+                    {/* Custom prompt input */}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={customPrompt}
+                        onChange={e => setCustomPrompt(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && customPrompt.trim() && !rewriting) {
+                            setBubbleLabel('custom');
+                            handleRewrite(customPrompt.trim());
+                          }
+                          if (e.key === 'Escape') dismissBubble();
                         }}
-                        className={rewriting ? 'loading' : ''}
-                        disabled={rewriting}
+                        placeholder="Write your own instruction…"
+                        style={{
+                          flex: 1,
+                          fontSize: 11,
+                          padding: '5px 9px',
+                          borderRadius: 4,
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          background: 'rgba(255,255,255,0.07)',
+                          color: 'white',
+                          outline: 'none',
+                        }}
+                      />
+                      <button
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          if (!customPrompt.trim() || rewriting) return;
+                          setBubbleLabel('custom');
+                          handleRewrite(customPrompt.trim());
+                        }}
+                        disabled={!customPrompt.trim() || rewriting}
+                        style={{
+                          padding: '5px 10px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: 'white',
+                          background: customPrompt.trim() ? 'var(--teal)' : 'rgba(255,255,255,0.1)',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: customPrompt.trim() ? 'pointer' : 'not-allowed',
+                          whiteSpace: 'nowrap',
+                        }}
                       >
-                        {rewriting && bubbleLabel === action.label ? '…' : action.label}
+                        {rewriting && bubbleLabel === 'custom' ? '…' : '↵ Ask'}
                       </button>
-                    ))}
+                    </div>
                   </div>
                 )}
 
