@@ -326,7 +326,7 @@ export default function TemplatesPage() {
                     )}
                   </button>
                   {!canSubmit && (
-                    <p style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center', marginTop: -8 }}>
+                    <p style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'center', marginTop: 4 }}>
                       {!templateName.trim() ? 'Enter a template name to continue' : 'Select a .docx file to continue'}
                     </p>
                   )}
