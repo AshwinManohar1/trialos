@@ -11,7 +11,7 @@ from models import (
     Study, DrugProfile, DerivedPKProperties,
     ProtocolDocument, RiskReport, ScreeningForecast, OrgTemplate
 )
-from routers import studies, drug_lookup, protocol, risk, screening, templates
+from routers import studies, drug_lookup, protocol, risk, screening, templates, activity
 
 app = FastAPI(
     title="TrialOS API",
@@ -299,6 +299,7 @@ app.include_router(protocol.router, prefix="/api")
 app.include_router(risk.router, prefix="/api")
 app.include_router(screening.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
+app.include_router(activity.router, prefix="/api")
 
 
 # ──────────────────────────────────────────────
