@@ -45,6 +45,34 @@ async def _call_openai_json(system_prompt: str, user_prompt: str, max_tokens: in
         return json.loads(raw)
 
 
+async def _call_openai_text(system_prompt: str, user_prompt: str, max_tokens: int = 2048) -> str:
+    """Call OpenAI and return raw text (no JSON parsing)."""
+    response = await get_client().chat.completions.create(
+        model="gpt-4o",
+        max_tokens=max_tokens,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+async def rewrite_section(text: str, instruction: str) -> str:
+    """Rewrite a protocol text section per the given instruction.
+    Returns plain text (or minimal HTML) suitable for insertion into the editor.
+    """
+    system = (
+        "You are a clinical protocol writer specialising in ICH/FDA-compliant "
+        "bioequivalence study documents. Rewrite the provided protocol text exactly "
+        "as instructed. Output ONLY the rewritten text — no preamble, no explanation, "
+        "no markdown fences. Preserve the original meaning and clinical accuracy. "
+        "Use plain prose; do not add bullet points unless the original has them."
+    )
+    user = f"Instruction: {instruction}\n\nOriginal text:\n{text}"
+    return await _call_openai_text(system, user, max_tokens=800)
+
+
 # ──────────────────────────────────────────────
 # Prompts
 # ──────────────────────────────────────────────
@@ -319,6 +347,124 @@ async def analyze_pre_protocol_risk(
     )
 
     return await _call_openai_json(PRE_PROTOCOL_RISK_SYSTEM, user_prompt, max_tokens=4096)
+
+
+# ──────────────────────────────────────────────
+# Protocol Content Generator
+# ──────────────────────────────────────────────
+
+PROTOCOL_CONTENT_SYSTEM = """You are a senior clinical research associate at a Contract Research Organization (CRO) specialising in Bioequivalence (BE) studies. You write study protocols that are submitted to the FDA, EMA, and Health Canada.
+
+Generate a complete, drug-specific BE protocol content set in JSON. Every section must be SPECIFIC to this drug — not generic boilerplate. Use the provided PK parameters, safety flags, formulation, and regulatory targets to tailor every section.
+
+Return ONLY valid JSON with this exact schema:
+
+{
+  "study_title": "<full formal title, e.g. 'A Randomized, Open-Label, Two-Period, Two-Treatment, Two-Sequence, Single-Dose, Crossover Bioequivalence Study of Atorvastatin Calcium Tablets 40 mg vs. Lipitor® 40 mg in Healthy Adult Subjects Under Fasting Conditions'>",
+  "study_phase": "Phase I",
+  "study_design_narrative": "<3–4 sentence description: crossover design, periods, washout, conditions (fasting/fed), site confinement, ambulatory follow-up>",
+  "primary_objective": "<one sentence stating the BE objective with specific reference drug and regulatory target>",
+  "secondary_objectives": ["<list 3–5 secondary objectives: safety, tolerability, secondary PK parameters like t½ and Tmax>"],
+  "inclusion_criteria": [
+    "<numbered criterion — e.g. '1. Healthy male or female subjects aged 18 to 55 years, inclusive.'>",
+    "<2. Body weight ≥ 50 kg and BMI between 18.5 and 30.0 kg/m², inclusive.>",
+    "<3. Non-smoker or ex-smoker who has not used tobacco for ≥6 months prior to screening.>",
+    "<4. Negative urine drug screen and alcohol breath test at screening and check-in.>",
+    "<add drug-specific criteria based on safety flags — e.g. QTcF ≤ 450ms for QT-prolonging drugs, ALT/AST ≤ 1.5×ULN for hepatotoxic drugs>",
+    "...(minimum 10 criteria total)"
+  ],
+  "exclusion_criteria": [
+    "<1. History or presence of clinically significant cardiovascular, hepatic, renal, haematological, neurological, psychiatric, or other disease that would compromise safety or BE assessment.>",
+    "<2. Use of any prescription medication within 14 days or 5 half-lives (whichever is longer) prior to dosing.>",
+    "<3. Use of enzyme-inducing or enzyme-inhibiting medications within 30 days of dosing.>",
+    "<add drug-specific exclusions based on safety flags — e.g. QTcF > 450ms for QT drugs, active liver disease for hepatic drugs>",
+    "...(minimum 15 criteria total)"
+  ],
+  "withdrawal_criteria": ["<list 5–8 criteria for subject withdrawal during the study>"],
+  "confinement_schedule": "<detailed day-by-day schedule: Day -1 check-in time, fasting start, Day 1 wake-up, pre-dose procedures, dosing time, post-dose restrictions, meal times (standard meals with volumes), confinement end, ambulatory visit schedule>",
+  "dose_administration": "<exact dosing procedure: volume of water, tablet swallowing requirements, posture post-dose, fasting duration pre and post-dose, grapefruit/dietary restrictions>",
+  "pk_sampling_procedure": "<detailed blood sampling procedure: pre-dose sample collection, volumes per draw (typically 4–6 mL), EDTA tubes, sample processing (centrifuge at 3000 rpm × 10 min at 4°C), storage (−70°C until analysis), shipping conditions. Include the complete sampling schedule as a table-ready string>",
+  "safety_assessments": "<comprehensive table-format schedule of: medical history, physical examination, vital signs (frequency), ECG (timing — especially if QTc drug), laboratory tests (haematology, biochemistry, urinalysis — specify panels and timing at: screening, each check-in, post-dose, end-of-study), any drug-specific monitoring from safety_flags>",
+  "diet_restrictions": "<complete dietary instructions: pre-study fasting duration, standardised confinement meals (breakfast timing, contents, caloric value where relevant), prohibited items (grapefruit for CYP3A4 drugs, alcohol, high-fat foods if fasting study), caffeine restrictions, post-study diet instructions>",
+  "statistical_analysis": "<full statistical plan: primary PK parameters (AUC0-t, AUC0-inf, Cmax), ANOVA model (factors: sequence, period, treatment, subjects within sequence), point estimates (geometric mean ratios), 90% confidence interval method, BE acceptance criteria (80.00–125.00%), software (Phoenix WinNonlin), handling of missing data, outlier policy>",
+  "stopping_criteria": ["<list 5–6 criteria for stopping the study: SAE rate, BE failure interim if applicable, regulatory hold>"],
+  "adverse_event_management": "<AE reporting procedure: grading (CTCAE v5.0), causality assessment, reporting timelines (SAE within 24h to sponsor), follow-up procedures for ongoing AEs at end of study>",
+  "references": ["<cite at minimum: relevant FDA BE Recommendation for the drug, ICH M13A (2023), ICH E6(R3) GCP, ICH M3(R2), bioanalytical method validation guidance>"]
+}
+
+CRITICAL RULES:
+- Inclusion/exclusion criteria must include drug-specific criteria derived from the safety_flags provided (e.g. QTcF limit for QT-prolonging drugs, LFT limits for hepatotoxic drugs, renal function for renally-cleared drugs)
+- Confinement schedule must reference actual timepoints from pk_sampling_timepoints
+- Safety assessments must reference timing at actual PK sampling points from safety_flags (e.g. ECG at 2h and 4h post-dose, not generic)
+- Statistical analysis must cite the actual intrasubject CV and the computed sample size
+- Diet restrictions must reference the specific food/drug interactions for this molecule (CYP3A4 substrate → grapefruit, SGLT2 → ketone monitoring, etc.)
+- All references must be real documents with correct years
+"""
+
+async def generate_protocol_sections(
+    study_id: str,
+    drug_name: str,
+    dose: str,
+    formulation: str,
+    route: str,
+    reference_product: str,
+    reference_country: str,
+    sponsor_name: str,
+    regulatory_targets: list,
+    target_subjects: int,
+    special_instructions: str,
+    half_life: float,
+    tmax: float,
+    absorption_class: str,
+    washout_days: int,
+    confinement_hours: int,
+    ambulatory_visits: list,
+    posture_restriction: str,
+    pk_sampling_timepoints: list,
+    intrasubject_cv: float,
+    sample_size_recommended: int,
+    sample_size_basis: str,
+    safety_flags: list,
+) -> dict:
+    """Generate comprehensive protocol section content using AI."""
+    reg_str = ", ".join(regulatory_targets) if regulatory_targets else "US FDA"
+    tp_str = ", ".join(
+        (f"{t:g}h" if t != int(t) else f"{int(t)}h") for t in (pk_sampling_timepoints or [])
+    )
+    ambulatory_str = ", ".join(ambulatory_visits) if ambulatory_visits else "None"
+    safety_str = json.dumps(safety_flags, indent=2) if safety_flags else "None"
+
+    user_prompt = (
+        f"Study ID: {study_id}\n"
+        f"Drug (INN): {drug_name}\n"
+        f"Dose: {dose}\n"
+        f"Formulation: {formulation}\n"
+        f"Route: {route}\n"
+        f"Reference product: {reference_product} ({reference_country})\n"
+        f"Sponsor: {sponsor_name}\n"
+        f"Regulatory targets: {reg_str}\n"
+        f"Target subjects: {target_subjects}\n"
+        f"Special instructions: {special_instructions or 'Standard fasting BE study'}\n\n"
+        f"PK PARAMETERS:\n"
+        f"  Half-life (t½): {half_life}h\n"
+        f"  Tmax: {tmax}h\n"
+        f"  Absorption class: {absorption_class}\n"
+        f"  Washout: {washout_days} days\n"
+        f"  Confinement: {confinement_hours}h\n"
+        f"  Ambulatory visits: {ambulatory_str}\n"
+        f"  Posture restriction: {posture_restriction or 'None'}\n"
+        f"  PK sampling timepoints: {tp_str}\n"
+        f"  Intrasubject CV: {intrasubject_cv}%\n"
+        f"  Recommended sample size: {sample_size_recommended}\n"
+        f"  Sample size basis: {sample_size_basis}\n\n"
+        f"SAFETY FLAGS:\n{safety_str}\n\n"
+        f"Generate all protocol sections. Every section must be specific to {drug_name} — not generic. "
+        f"Inclusion/exclusion criteria must reflect the safety_flags above. "
+        f"Confinement schedule must use the exact timepoints listed. "
+        f"Return valid JSON only."
+    )
+
+    return await _call_openai_json(PROTOCOL_CONTENT_SYSTEM, user_prompt, max_tokens=6000)
 
 
 # ──────────────────────────────────────────────

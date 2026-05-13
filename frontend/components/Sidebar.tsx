@@ -117,6 +117,18 @@ export function Sidebar({ studyId, studyLabel }: SidebarProps) {
                 Templates
               </Link>
             </div>
+
+            <div className="relative">
+              <ActiveBar href="/activity" />
+              <Link href="/activity" className={navLink('/activity')}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 3h10M2 6h7M2 9h5M2 12h8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  <circle cx="11" cy="10.5" r="2.5" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M10 10.5l.8.8 1.5-1.3" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Activity
+              </Link>
+            </div>
           </div>
         ) : (
           /* Study context nav */

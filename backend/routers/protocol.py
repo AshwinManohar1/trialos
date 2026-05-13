@@ -3,11 +3,13 @@ from datetime import datetime
 from bson import ObjectId
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from database import get_gridfs
 from models import Study, DrugProfile, DerivedPKProperties, ProtocolDocument, OrgTemplate
 from schemas import ProtocolDocumentResponse
 from services import docx_service
+from services.claude_service import generate_protocol_sections, rewrite_section
 
 router = APIRouter(tags=["Protocol"])
 
@@ -150,11 +152,43 @@ async def fill_protocol(study_id: str):
     await proto.save()
 
     try:
+        # Generate AI protocol sections before building the DOCX
+        try:
+            ai_sections = await generate_protocol_sections(
+                study_id=study.id,
+                drug_name=drug_profile.drug_name or "",
+                dose=drug_profile.dose or "",
+                formulation=drug_profile.formulation or "",
+                route=drug_profile.route or "oral",
+                reference_product=drug_profile.reference_product or "",
+                reference_country=drug_profile.reference_country or "",
+                sponsor_name=drug_profile.sponsor_name or "",
+                regulatory_targets=drug_profile.regulatory_targets or [],
+                target_subjects=drug_profile.target_subjects or pk.sample_size_recommended or 24,
+                special_instructions=drug_profile.special_instructions or "",
+                half_life=pk.half_life_hours or 0,
+                tmax=pk.tmax_hours or 0,
+                absorption_class=pk.absorption_class or "",
+                washout_days=pk.washout_days or 0,
+                confinement_hours=pk.confinement_hours or 24,
+                ambulatory_visits=pk.ambulatory_visits or [],
+                posture_restriction=pk.posture_restriction or "",
+                pk_sampling_timepoints=pk.pk_sampling_timepoints or [],
+                intrasubject_cv=pk.intrasubject_cv or 0,
+                sample_size_recommended=pk.sample_size_recommended or 0,
+                sample_size_basis=pk.sample_size_basis or "",
+                safety_flags=pk.safety_flags or [],
+            )
+        except Exception as ai_err:
+            print(f"⚠ AI protocol generation failed, proceeding with basic fill: {ai_err}")
+            ai_sections = {}
+
         filled_bytes = docx_service.fill_protocol_template_bytes(
             template_bytes=template_bytes,
             study=study,
             drug_profile=drug_profile,
             pk=pk,
+            ai_sections=ai_sections,
         )
         filled_filename = f"{study_id}_filled_protocol.docx"
         filled_id = await bucket.upload_from_stream(
@@ -231,3 +265,21 @@ async def download_filled_protocol(study_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{proto.filled_filename}"'},
     )
+
+
+class RewriteRequest(BaseModel):
+    text: str
+    instruction: str
+
+
+@router.post("/studies/{study_id}/protocol/rewrite-section")
+async def rewrite_protocol_section(study_id: str, payload: RewriteRequest):
+    """Rewrite a selected protocol section using AI."""
+    await _require_study(study_id)
+    if not payload.text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    try:
+        rewritten = await rewrite_section(payload.text, payload.instruction)
+        return {"text": rewritten}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rewrite failed: {e}")

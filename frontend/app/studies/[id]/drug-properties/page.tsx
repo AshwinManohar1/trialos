@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
 import { api } from '@/lib/api';
-import { Study, DerivedPKProperties } from '@/lib/types';
+import { Study, DerivedPKProperties, SafetyFlag } from '@/lib/types';
 
 export default function DrugPropertiesPage() {
   const params = useParams();
@@ -18,8 +18,16 @@ export default function DrugPropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Per-field editing state
   const [editField, setEditField] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<DerivedPKProperties>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Safety flags edit state
+  const [editingFlagIdx, setEditingFlagIdx] = useState<number | null>(null);
+  const [flagDraft, setFlagDraft] = useState<SafetyFlag | null>(null);
 
   useEffect(() => {
     loadStudy();
@@ -49,7 +57,7 @@ export default function DrugPropertiesPage() {
     }
   }
 
-  async function pollForPK() {
+  function pollForPK() {
     let attempts = 0;
     const maxAttempts = 30;
     const interval = setInterval(async () => {
@@ -89,18 +97,111 @@ export default function DrugPropertiesPage() {
 
   function startEdit(field: string) {
     setEditField(field);
+    setSaveError(null);
     if (pk) setEditValues({ ...pk });
   }
 
   function cancelEdit() {
     setEditField(null);
     setEditValues({});
+    setSaveError(null);
   }
 
-  function saveEdit() {
-    if (pk && editValues) setPk({ ...pk, ...editValues });
-    setEditField(null);
-    setEditValues({});
+  async function saveEdit(field: string) {
+    if (!pk || !editValues) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const patch: Record<string, unknown> = {};
+      patch[field] = editValues[field as keyof DerivedPKProperties];
+      const updated = await api.patchPK(studyId, patch);
+      if (updated && !updated.detail) {
+        setPk(updated);
+      } else {
+        // fallback: update local state optimistically
+        setPk({ ...pk, ...patch } as DerivedPKProperties);
+      }
+      setEditField(null);
+      setEditValues({});
+    } catch {
+      setSaveError('Failed to save. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Safety flag helpers
+  function startEditFlag(idx: number) {
+    if (!pk) return;
+    setEditingFlagIdx(idx);
+    setFlagDraft({ ...pk.safety_flags[idx] });
+  }
+
+  function cancelEditFlag() {
+    setEditingFlagIdx(null);
+    setFlagDraft(null);
+  }
+
+  async function saveFlag(idx: number) {
+    if (!pk || !flagDraft) return;
+    setSaving(true);
+    try {
+      const newFlags = [...pk.safety_flags];
+      newFlags[idx] = flagDraft;
+      const updated = await api.patchPK(studyId, { safety_flags: newFlags });
+      if (updated && !updated.detail) {
+        setPk(updated);
+      } else {
+        setPk({ ...pk, safety_flags: newFlags });
+      }
+      setEditingFlagIdx(null);
+      setFlagDraft(null);
+    } catch {
+      setSaveError('Failed to save flag.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteFlag(idx: number) {
+    if (!pk) return;
+    setSaving(true);
+    try {
+      const newFlags = pk.safety_flags.filter((_, i) => i !== idx);
+      const updated = await api.patchPK(studyId, { safety_flags: newFlags });
+      if (updated && !updated.detail) {
+        setPk(updated);
+      } else {
+        setPk({ ...pk, safety_flags: newFlags });
+      }
+    } catch {
+      setSaveError('Failed to delete flag.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addFlag() {
+    if (!pk) return;
+    const newFlag: SafetyFlag = { type: 'New Flag', description: '', requirements: [] };
+    const newFlags = [...pk.safety_flags, newFlag];
+    setSaving(true);
+    try {
+      const updated = await api.patchPK(studyId, { safety_flags: newFlags });
+      if (updated && !updated.detail) {
+        setPk(updated);
+        setEditingFlagIdx(newFlags.length - 1);
+        setFlagDraft(newFlag);
+      } else {
+        setPk({ ...pk, safety_flags: newFlags });
+        setEditingFlagIdx(newFlags.length - 1);
+        setFlagDraft(newFlag);
+      }
+    } catch {
+      setSaveError('Failed to add flag.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   const drugName = study?.drug_profile?.drug_name || 'Drug';
@@ -150,42 +251,41 @@ export default function DrugPropertiesPage() {
                 {pageTitle}
               </h1>
               <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>
-                Pharmacokinetic profile — review and edit before generating protocol
+                Pharmacokinetic profile — click any value to edit before generating protocol
               </p>
             </div>
             {pk && (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => startEdit('half_life_hours')}
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--text-2)',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 3,
-                    padding: '6px 14px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Edit
-                </button>
-                <Link
-                  href={`/studies/${studyId}/protocol`}
-                  style={{
-                    fontSize: 12,
-                    color: 'white',
-                    background: 'var(--teal)',
-                    borderRadius: 3,
-                    padding: '6px 14px',
-                    textDecoration: 'none',
-                    fontWeight: 500,
-                  }}
-                >
-                  Confirm & Continue →
-                </Link>
-              </div>
+              <Link
+                href={`/studies/${studyId}/protocol`}
+                style={{
+                  fontSize: 12,
+                  color: 'white',
+                  background: 'var(--teal)',
+                  borderRadius: 3,
+                  padding: '6px 14px',
+                  textDecoration: 'none',
+                  fontWeight: 500,
+                }}
+              >
+                Confirm & Continue →
+              </Link>
             )}
           </div>
+
+          {/* Save error */}
+          {saveError && (
+            <div
+              className="mb-4 px-4 py-3 text-sm"
+              style={{
+                background: 'var(--critical-bg)',
+                border: '1px solid var(--critical-border)',
+                borderRadius: 3,
+                color: 'var(--critical)',
+              }}
+            >
+              {saveError}
+            </div>
+          )}
 
           {/* Error */}
           {error && (
@@ -220,7 +320,6 @@ export default function DrugPropertiesPage() {
                 textAlign: 'center',
               }}
             >
-              {/* Pulse animation */}
               <div style={{ position: 'relative', marginBottom: 20 }}>
                 <div
                   style={{
@@ -295,12 +394,67 @@ export default function DrugPropertiesPage() {
                 <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3 }}>
                   <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                     <tbody>
-                      <PKRow label="t½" value={`${pk.half_life_hours} h`} source={pk.source_references[0]} field="half_life_hours" editField={editField} editValues={editValues} setEditValues={setEditValues} onEdit={startEdit} onSave={saveEdit} onCancel={cancelEdit} unit="hours" />
-                      <PKRow label="Tmax" value={`${pk.tmax_hours} h`} source="FDA label" field="tmax_hours" editField={editField} editValues={editValues} setEditValues={setEditValues} onEdit={startEdit} onSave={saveEdit} onCancel={cancelEdit} unit="hours" />
+                      <EditRow
+                        label="t½"
+                        value={`${pk.half_life_hours} h`}
+                        source={pk.source_references[0]}
+                        field="half_life_hours"
+                        type="number"
+                        unit="hours"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                      />
+                      <EditRow
+                        label="Tmax"
+                        value={`${pk.tmax_hours} h`}
+                        source="FDA label"
+                        field="tmax_hours"
+                        type="number"
+                        unit="hours"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                      />
                       {pk.intrasubject_cv !== undefined && (
-                        <PKRow label="Intrasubject CV" value={`${pk.intrasubject_cv} %`} source="FDA BE recommendation" field="intrasubject_cv" editField={editField} editValues={editValues} setEditValues={setEditValues} onEdit={startEdit} onSave={saveEdit} onCancel={cancelEdit} unit="%" />
+                        <EditRow
+                          label="Intrasubject CV"
+                          value={`${pk.intrasubject_cv} %`}
+                          source="FDA BE recommendation"
+                          field="intrasubject_cv"
+                          type="number"
+                          unit="%"
+                          editField={editField}
+                          editValues={editValues}
+                          setEditValues={setEditValues}
+                          onEdit={startEdit}
+                          onSave={saveEdit}
+                          onCancel={cancelEdit}
+                          saving={saving}
+                        />
                       )}
-                      <PKRow label="Absorption class" value={pk.absorption_class} field="absorption_class" editField={editField} editValues={editValues} setEditValues={setEditValues} onEdit={startEdit} onSave={saveEdit} onCancel={cancelEdit} isText isLast />
+                      <EditRow
+                        label="Absorption class"
+                        value={pk.absorption_class}
+                        field="absorption_class"
+                        type="text"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                        isLast
+                      />
                     </tbody>
                   </table>
                 </div>
@@ -312,11 +466,64 @@ export default function DrugPropertiesPage() {
                 <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3 }}>
                   <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                     <tbody>
-                      <ParamRow label="Washout period" value={`${pk.washout_days} days`} note={`≥ 5 × t½ = ${Math.round(pk.half_life_hours * 5)}h → ${pk.washout_days} days`} />
-                      <ParamRow label="Last PK sample" value={`${pk.pk_sampling_timepoints[pk.pk_sampling_timepoints.length - 1]} h`} note={`≥ 3 × t½ = ${Math.round(pk.half_life_hours * 3)}h → standard`} />
-                      <ParamRow label="In-house confinement" value={`${pk.confinement_hours} h`} />
-                      <ParamRow label="Ambulatory visits" value={pk.ambulatory_visits.join(', ') || 'None'} mono />
-                      <ParamRow label="Posture restriction" value={pk.posture_restriction || 'None'} isLast />
+                      <EditRow
+                        label="Washout period"
+                        value={`${pk.washout_days} days`}
+                        note={`≥ 5 × t½ = ${Math.round(pk.half_life_hours * 5)}h → ${pk.washout_days} days`}
+                        field="washout_days"
+                        type="number"
+                        unit="days"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                        isInteger
+                      />
+                      <EditRow
+                        label="In-house confinement"
+                        value={`${pk.confinement_hours} h`}
+                        field="confinement_hours"
+                        type="number"
+                        unit="hours"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                        isInteger
+                      />
+                      <EditRow
+                        label="Posture restriction"
+                        value={pk.posture_restriction || 'None'}
+                        field="posture_restriction"
+                        type="text"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                      />
+                      <ArrayEditRow
+                        label="Ambulatory visits"
+                        values={pk.ambulatory_visits}
+                        field="ambulatory_visits"
+                        type="strings"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                        isLast
+                      />
                     </tbody>
                   </table>
                 </div>
@@ -328,25 +535,35 @@ export default function DrugPropertiesPage() {
                 <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3 }}>
                   <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                     <tbody>
-                      <ParamRow
+                      <EditRow
                         label="Required (80% power, α=0.05, GMR=1.00)"
                         value={`${pk.sample_size_recommended} subjects`}
-                        mono
+                        field="sample_size_recommended"
+                        type="number"
+                        unit="subjects"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                        isInteger
                       />
-                      <ParamRow
-                        label="Your target (incl. 15% dropout buffer)"
-                        value={`${study?.drug_profile?.target_subjects || 30} subjects`}
-                        mono
+                      <EditRow
+                        label="Sample size basis"
+                        value={pk.sample_size_basis || '—'}
+                        field="sample_size_basis"
+                        type="text"
+                        editField={editField}
+                        editValues={editValues}
+                        setEditValues={setEditValues}
+                        onEdit={startEdit}
+                        onSave={saveEdit}
+                        onCancel={cancelEdit}
+                        saving={saving}
+                        isLast
                       />
-                      {pk.intrasubject_cv !== undefined && (
-                        <ParamRow
-                          label="CV used for calculation"
-                          value={`${pk.intrasubject_cv}%`}
-                          note="published"
-                          mono
-                          isLast
-                        />
-                      )}
                     </tbody>
                   </table>
                 </div>
@@ -363,78 +580,266 @@ export default function DrugPropertiesPage() {
                     padding: '16px',
                   }}
                 >
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {pk.pk_sampling_timepoints.map((tp, i) => (
-                      <span
-                        key={i}
+                  {editField === 'pk_sampling_timepoints' ? (
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 6 }}>
+                        Timepoints (comma-separated numbers in hours)
+                      </label>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={
+                          Array.isArray(editValues.pk_sampling_timepoints)
+                            ? editValues.pk_sampling_timepoints.join(', ')
+                            : ''
+                        }
+                        onChange={e => {
+                          const raw = e.target.value;
+                          const parsed = raw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+                          setEditValues({ ...editValues, pk_sampling_timepoints: parsed });
+                        }}
+                        style={{
+                          width: '100%',
+                          fontFamily: 'var(--mono)',
+                          fontSize: 12,
+                          padding: '6px 10px',
+                          border: '1px solid var(--teal)',
+                          borderRadius: 3,
+                          color: 'var(--text)',
+                          background: 'var(--surface)',
+                          marginBottom: 8,
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveEdit('pk_sampling_timepoints')}
+                          disabled={saving}
+                          style={{ fontSize: 12, color: 'white', background: 'var(--teal)', border: 'none', borderRadius: 3, padding: '5px 12px', cursor: 'pointer' }}
+                        >
+                          {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={cancelEdit}
+                          style={{ fontSize: 12, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {pk.pk_sampling_timepoints.map((tp, i) => (
+                          <span
+                            key={i}
+                            className="font-mono"
+                            style={{
+                              fontSize: 12,
+                              padding: '3px 8px',
+                              background: 'var(--surface-2)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 3,
+                              color: 'var(--text)',
+                            }}
+                          >
+                            {tp}h
+                          </span>
+                        ))}
+                        <button
+                          onClick={() => {
+                            setEditField('pk_sampling_timepoints');
+                            setEditValues({ ...pk });
+                          }}
+                          style={{
+                            fontSize: 11,
+                            color: 'var(--text-3)',
+                            background: 'none',
+                            border: '1px solid var(--border)',
+                            borderRadius: 3,
+                            padding: '3px 8px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                      <p
                         className="font-mono"
                         style={{
-                          fontSize: 12,
-                          padding: '3px 8px',
+                          fontSize: 11,
+                          color: 'var(--text-3)',
                           background: 'var(--surface-2)',
                           border: '1px solid var(--border)',
                           borderRadius: 3,
-                          color: 'var(--text)',
+                          padding: '6px 10px',
+                          textAlign: 'center',
                         }}
                       >
-                        {tp}h
-                      </span>
-                    ))}
-                  </div>
-                  <p
-                    className="font-mono"
-                    style={{
-                      fontSize: 11,
-                      color: 'var(--text-3)',
-                      background: 'var(--surface-2)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 3,
-                      padding: '6px 10px',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {pk.pk_sampling_timepoints.length} samples per period · 3 mL each · K₂EDTA ·{' '}
-                    Total: {pk.pk_sampling_timepoints.length * 3} mL/period
-                  </p>
+                        {pk.pk_sampling_timepoints.length} samples per period · 3 mL each · K₂EDTA ·{' '}
+                        Total: {pk.pk_sampling_timepoints.length * 3} mL/period
+                      </p>
+                    </>
+                  )}
                 </div>
               </section>
 
               {/* Safety Flags */}
-              {pk.safety_flags && pk.safety_flags.length > 0 && (
-                <section>
-                  <div className="section-header"><span>Safety Flags</span></div>
+              <section>
+                <div className="section-header flex items-center justify-between">
+                  <span>Safety Flags</span>
+                  <button
+                    onClick={addFlag}
+                    disabled={saving}
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--teal)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                  >
+                    + Add flag
+                  </button>
+                </div>
+                {pk.safety_flags && pk.safety_flags.length > 0 ? (
                   <div className="space-y-3">
                     {pk.safety_flags.map((flag, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          background: 'var(--warning-bg)',
-                          border: '1px solid var(--warning-border)',
-                          borderLeft: '3px solid var(--warning)',
-                          borderRadius: 3,
-                          padding: '12px 16px',
-                        }}
-                      >
-                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--warning)', marginBottom: 4 }}>
-                          ⚠ {flag.type}
-                        </p>
-                        <p style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: flag.requirements.length > 0 ? 8 : 0 }}>
-                          {flag.description}
-                        </p>
-                        {flag.requirements.length > 0 && (
-                          <ul style={{ margin: 0, paddingLeft: 16 }}>
-                            {flag.requirements.map((req, j) => (
-                              <li key={j} style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 2 }}>
-                                {req}
-                              </li>
-                            ))}
-                          </ul>
+                      <div key={i}>
+                        {editingFlagIdx === i && flagDraft ? (
+                          <div
+                            style={{
+                              background: 'var(--surface)',
+                              border: '1px solid var(--teal)',
+                              borderRadius: 3,
+                              padding: '14px 16px',
+                            }}
+                          >
+                            <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: '1fr 2fr' }}>
+                              <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Type</label>
+                                <input
+                                  type="text"
+                                  value={flagDraft.type}
+                                  onChange={e => setFlagDraft({ ...flagDraft, type: e.target.value })}
+                                  style={{
+                                    width: '100%', fontSize: 12, padding: '5px 8px',
+                                    border: '1px solid var(--border)', borderRadius: 3,
+                                    color: 'var(--text)', background: 'var(--surface)',
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Description</label>
+                                <input
+                                  type="text"
+                                  value={flagDraft.description}
+                                  onChange={e => setFlagDraft({ ...flagDraft, description: e.target.value })}
+                                  style={{
+                                    width: '100%', fontSize: 12, padding: '5px 8px',
+                                    border: '1px solid var(--border)', borderRadius: 3,
+                                    color: 'var(--text)', background: 'var(--surface)',
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div className="mb-3">
+                              <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>
+                                Requirements <span style={{ opacity: 0.7 }}>(one per line)</span>
+                              </label>
+                              <textarea
+                                value={flagDraft.requirements.join('\n')}
+                                onChange={e => setFlagDraft({
+                                  ...flagDraft,
+                                  requirements: e.target.value.split('\n').filter(l => l.trim()),
+                                })}
+                                rows={3}
+                                style={{
+                                  width: '100%', fontSize: 12, padding: '5px 8px',
+                                  border: '1px solid var(--border)', borderRadius: 3,
+                                  color: 'var(--text)', background: 'var(--surface)',
+                                  resize: 'vertical', fontFamily: 'inherit',
+                                }}
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => saveFlag(i)}
+                                disabled={saving}
+                                style={{ fontSize: 12, color: 'white', background: 'var(--teal)', border: 'none', borderRadius: 3, padding: '5px 12px', cursor: 'pointer' }}
+                              >
+                                {saving ? 'Saving…' : 'Save'}
+                              </button>
+                              <button
+                                onClick={cancelEditFlag}
+                                style={{ fontSize: 12, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              background: 'var(--warning-bg)',
+                              border: '1px solid var(--warning-border)',
+                              borderLeft: '3px solid var(--warning)',
+                              borderRadius: 3,
+                              padding: '12px 16px',
+                            }}
+                          >
+                            <div className="flex items-start justify-between">
+                              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--warning)', marginBottom: 4 }}>
+                                ⚠ {flag.type}
+                              </p>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => startEditFlag(i)}
+                                  style={{ fontSize: 11, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => deleteFlag(i)}
+                                  style={{ fontSize: 11, color: 'var(--critical)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                            <p style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: flag.requirements.length > 0 ? 8 : 0 }}>
+                              {flag.description}
+                            </p>
+                            {flag.requirements.length > 0 && (
+                              <ul style={{ margin: 0, paddingLeft: 16 }}>
+                                {flag.requirements.map((req, j) => (
+                                  <li key={j} style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 2 }}>
+                                    {req}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}
                   </div>
-                </section>
-              )}
+                ) : (
+                  <div
+                    style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 3,
+                      padding: '16px',
+                      textAlign: 'center',
+                      color: 'var(--text-3)',
+                      fontSize: 12,
+                    }}
+                  >
+                    No safety flags — click "+ Add flag" to add drug-specific safety requirements
+                  </div>
+                )}
+              </section>
 
               {/* Sources */}
               {pk.source_references && pk.source_references.length > 0 && (
@@ -486,23 +891,29 @@ export default function DrugPropertiesPage() {
   );
 }
 
-// PK Row with inline edit
-function PKRow({
-  label, value, source, field, editField, editValues, setEditValues, onEdit, onSave, onCancel, unit, isText, isLast
+// ─────────────────────────────────────────────────────────────
+// EditRow — single scalar field (number or text)
+// ─────────────────────────────────────────────────────────────
+function EditRow({
+  label, value, source, note, field, type, unit, isInteger, isLast,
+  editField, editValues, setEditValues, onEdit, onSave, onCancel, saving,
 }: {
   label: string;
   value: string;
   source?: string;
+  note?: string;
   field: string;
+  type: 'number' | 'text';
+  unit?: string;
+  isInteger?: boolean;
+  isLast?: boolean;
   editField: string | null;
   editValues: Partial<DerivedPKProperties>;
   setEditValues: (v: Partial<DerivedPKProperties>) => void;
   onEdit: (f: string) => void;
-  onSave: () => void;
+  onSave: (f: string) => void;
   onCancel: () => void;
-  unit?: string;
-  isText?: boolean;
-  isLast?: boolean;
+  saving: boolean;
 }) {
   const isEditing = editField === field;
   const currentVal = editValues[field as keyof DerivedPKProperties];
@@ -512,7 +923,7 @@ function PKRow({
       <td
         style={{
           padding: '8px 16px',
-          width: 200,
+          width: 240,
           fontSize: 12,
           color: 'var(--text-3)',
           fontWeight: 500,
@@ -526,16 +937,18 @@ function PKRow({
         {isEditing ? (
           <div className="flex items-center gap-2">
             <input
-              type={isText ? 'text' : 'number'}
+              type={type === 'number' ? 'number' : 'text'}
               value={String(currentVal ?? '')}
               onChange={e => setEditValues({
                 ...editValues,
-                [field]: isText ? e.target.value : parseFloat(e.target.value),
+                [field]: type === 'number'
+                  ? (isInteger ? parseInt(e.target.value) : parseFloat(e.target.value))
+                  : e.target.value,
               })}
               autoFocus
               style={{
-                width: 140,
-                fontFamily: 'var(--mono)',
+                width: type === 'text' ? 240 : 100,
+                fontFamily: type === 'number' ? 'var(--mono)' : 'inherit',
                 fontSize: 12,
                 padding: '4px 8px',
                 border: '1px solid var(--teal)',
@@ -546,10 +959,11 @@ function PKRow({
             />
             {unit && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{unit}</span>}
             <button
-              onClick={onSave}
-              style={{ fontSize: 11, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+              onClick={() => onSave(field)}
+              disabled={saving}
+              style={{ fontSize: 11, color: 'white', background: 'var(--teal)', border: 'none', borderRadius: 3, padding: '3px 10px', cursor: 'pointer' }}
             >
-              Save
+              {saving ? '…' : 'Save'}
             </button>
             <button
               onClick={onCancel}
@@ -565,6 +979,9 @@ function PKRow({
             </span>
             {source && (
               <span style={{ fontSize: 11, color: 'var(--text-3)' }}>Source: {source}</span>
+            )}
+            {note && (
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>({note})</span>
             )}
             <button
               onClick={() => onEdit(field)}
@@ -586,38 +1003,105 @@ function PKRow({
   );
 }
 
-function ParamRow({
-  label, value, note, mono, isLast
+// ─────────────────────────────────────────────────────────────
+// ArrayEditRow — comma-separated array field
+// ─────────────────────────────────────────────────────────────
+function ArrayEditRow({
+  label, values, field, type, isLast,
+  editField, editValues, setEditValues, onEdit, onSave, onCancel, saving,
 }: {
   label: string;
-  value: string;
-  note?: string;
-  mono?: boolean;
+  values: string[];
+  field: string;
+  type: 'strings' | 'numbers';
   isLast?: boolean;
+  editField: string | null;
+  editValues: Partial<DerivedPKProperties>;
+  setEditValues: (v: Partial<DerivedPKProperties>) => void;
+  onEdit: (f: string) => void;
+  onSave: (f: string) => void;
+  onCancel: () => void;
+  saving: boolean;
 }) {
+  const isEditing = editField === field;
+  const currentArr = (editValues[field as keyof DerivedPKProperties] as string[] | undefined) ?? values;
+
   return (
     <tr style={{ borderBottom: isLast ? 'none' : '1px solid var(--border)' }}>
       <td
         style={{
           padding: '8px 16px',
-          width: 260,
+          width: 240,
           fontSize: 12,
           color: 'var(--text-3)',
           fontWeight: 500,
           background: 'var(--surface-2)',
+          whiteSpace: 'nowrap',
         }}
       >
         {label}
       </td>
       <td style={{ padding: '8px 16px' }}>
-        <span
-          className={mono ? 'font-mono' : ''}
-          style={{ fontSize: 13, color: 'var(--text)', fontWeight: mono ? 500 : 400 }}
-        >
-          {value}
-        </span>
-        {note && (
-          <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 10 }}>({note})</span>
+        {isEditing ? (
+          <div>
+            <input
+              type="text"
+              autoFocus
+              value={Array.isArray(currentArr) ? currentArr.join(', ') : ''}
+              onChange={e => {
+                const raw = e.target.value;
+                const parsed = raw.split(',').map(s => s.trim()).filter(Boolean);
+                setEditValues({ ...editValues, [field]: parsed });
+              }}
+              placeholder="Comma-separated values"
+              style={{
+                width: 300,
+                fontFamily: 'var(--mono)',
+                fontSize: 12,
+                padding: '4px 8px',
+                border: '1px solid var(--teal)',
+                borderRadius: 3,
+                color: 'var(--text)',
+                background: 'var(--surface)',
+                marginRight: 8,
+              }}
+            />
+            <button
+              onClick={() => onSave(field)}
+              disabled={saving}
+              style={{ fontSize: 11, color: 'white', background: 'var(--teal)', border: 'none', borderRadius: 3, padding: '4px 10px', cursor: 'pointer' }}
+            >
+              {saving ? '…' : 'Save'}
+            </button>
+            {' '}
+            <button
+              onClick={onCancel}
+              style={{ fontSize: 11, color: 'var(--text-3)', background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="font-mono" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>
+              {values.length > 0 ? values.join(', ') : 'None'}
+            </span>
+            <button
+              onClick={() => {
+                onEdit(field);
+              }}
+              style={{
+                marginLeft: 'auto',
+                fontSize: 11,
+                color: 'var(--text-3)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              Edit
+            </button>
+          </div>
         )}
       </td>
     </tr>

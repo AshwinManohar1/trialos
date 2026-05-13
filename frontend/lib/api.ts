@@ -38,7 +38,7 @@ export const api = {
         }
         return data;
       }),
-  createStudy: (data: { id: string; name: string }) =>
+  createStudy: (data: { id: string; name: string; study_phase?: string }) =>
     fetch(`${API_BASE}/api/studies`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,6 +56,12 @@ export const api = {
     fetch(`${API_BASE}/api/studies/${studyId}/drug-lookup`, { method: 'POST' }).then(r => r.json()),
   getDerivedPK: (studyId: string) =>
     fetch(`${API_BASE}/api/studies/${studyId}/drug-lookup`).then(r => r.json()),
+  patchPK: (studyId: string, updates: Record<string, unknown>) =>
+    fetch(`${API_BASE}/api/studies/${studyId}/pk`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).then(r => r.json()),
 
   // Protocol
   uploadTemplate: (studyId: string, file: File) => {
@@ -70,6 +76,12 @@ export const api = {
     fetch(`${API_BASE}/api/studies/${studyId}/protocol/fill`, { method: 'POST' }).then(r => r.json()),
   getProtocol: (studyId: string) =>
     fetch(`${API_BASE}/api/studies/${studyId}/protocol`).then(r => r.json()),
+  rewriteSection: (studyId: string, text: string, instruction: string) =>
+    fetch(`${API_BASE}/api/studies/${studyId}/protocol/rewrite-section`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, instruction }),
+    }).then(r => r.json()),
 
   // Risk
   uploadRiskDocument: (studyId: string, file: File) => {
@@ -90,4 +102,24 @@ export const api = {
     fetch(`${API_BASE}/api/studies/${studyId}/screening/run`, { method: 'POST' }).then(r => r.json()),
   getScreening: (studyId: string) =>
     fetch(`${API_BASE}/api/studies/${studyId}/screening`).then(r => r.json()),
+
+  // Activity Task List
+  parseActivity: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return fetch(`${API_BASE}/api/activity/parse`, { method: 'POST', body: fd }).then(r => r.json());
+  },
+  exportActivity: (
+    tasks: { id: number; name: string }[],
+    studyInfo: { protocol_id?: string; drug_name?: string; num_periods?: number | null; num_subjects?: number | null },
+    logoBb64: string | null,
+  ) =>
+    fetch(`${API_BASE}/api/activity/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tasks, study_info: studyInfo, logo_b64: logoBb64 }),
+    }).then(r => {
+      if (!r.ok) return r.json().then(e => Promise.reject(e));
+      return r.blob();
+    }),
 };

@@ -31,6 +31,7 @@ def _study_response(s: Study) -> StudyResponse:
         org_id=s.org_id,
         name=s.name,
         status=s.status,
+        study_phase=s.study_phase,
         created_at=s.created_at,
         updated_at=s.updated_at,
     )
@@ -50,6 +51,7 @@ async def create_study(payload: StudyCreate):
         id=study_id,
         name=payload.name,
         status="draft",
+        study_phase=payload.study_phase,
         created_at=now,
         updated_at=now,
     )
@@ -111,6 +113,7 @@ async def list_studies():
             org_id=s.org_id,
             name=s.name,
             status=s.status,
+            study_phase=s.study_phase,
             created_at=s.created_at,
             updated_at=s.updated_at,
             drug_profile=dp_out,

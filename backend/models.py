@@ -9,6 +9,7 @@ class Study(Document):
     org_id: str = "cliantha"
     name: str
     status: str = "draft"  # draft | active | complete
+    study_phase: Optional[str] = None  # phase_1_be | early_fih | phase_1_2 | phase_2 | phase_3
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
